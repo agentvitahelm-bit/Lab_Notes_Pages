@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; font-src 'self' blob:; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>Secure documentation reader</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23154b5a'/%3E%3Cpath d='M9 14h14v11H9zm3 0V9a4 4 0 0 1 8 0v5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main">
+    <section id="unlock-panel" class="unlock-card" aria-labelledby="unlock-title">
+      <div class="lock-mark" aria-hidden="true">◆</div>
+      <h1 id="unlock-title">Secure documentation reader</h1>
+      <p>Enter the shared password to unlock this encrypted library on this device.</p>
+      <form id="unlock-form">
+        <label for="password">Shared password</label>
+        <input id="password" name="password" type="password" autocomplete="off" required minlength="16">
+        <button id="unlock-button" type="submit">Unlock library</button>
+      </form>
+      <p id="unlock-status" class="status" role="status" aria-live="polite"></p>
+      <noscript>JavaScript is required to decrypt this library locally.</noscript>
+    </section>
+    <section id="reader" class="reader" hidden aria-label="Documentation library">
+      <header class="reader-header">
+        <button id="menu-button" class="menu-button" type="button" aria-controls="sidebar" aria-expanded="false">Menu</button>
+        <strong>Knowledge Library</strong>
+        <button id="lock-button" class="secondary" type="button">Lock</button>
+      </header>
+      <div class="reader-grid">
+        <aside id="sidebar" class="sidebar" aria-label="Library navigation">
+          <label for="search">Search library</label>
+          <input id="search" type="search" autocomplete="off" placeholder="Search approved guidance">
+          <p id="search-status" class="visually-hidden" role="status" aria-live="polite"></p>
+          <nav id="navigation" aria-label="Pages"></nav>
+        </aside>
+        <article id="content" class="content" tabindex="-1"></article>
+      </div>
+    </section>
+  </main>
+  <script src="app.js" defer></script>
+</body>
+</html>
