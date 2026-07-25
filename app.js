@@ -151,6 +151,7 @@
       if (!href) return;
       if (/^(https?:|mailto:)/i.test(href)) {
         link.setAttribute("rel", "noopener noreferrer");
+        link.setAttribute("target", "_blank");
         return;
       }
       if (/^(javascript:|data:|file:)/i.test(href)) {
