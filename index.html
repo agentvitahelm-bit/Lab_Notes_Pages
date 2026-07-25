@@ -19,7 +19,12 @@
       <p>Enter the shared password to unlock this encrypted library on this device.</p>
       <form id="unlock-form">
         <label for="password">Shared password</label>
-        <input id="password" name="password" type="password" autocomplete="off" required minlength="16">
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="16">
+        <label class="checkbox-row" for="remember-unlock">
+          <input id="remember-unlock" name="remember-unlock" type="checkbox" aria-describedby="remember-help">
+          <span>Remember unlock on this device</span>
+        </label>
+        <small id="remember-help" class="help-text">Stores a device key—not the password—for this encrypted release. You will need the password again after the site updates. Do not use on a shared device.</small>
         <button id="unlock-button" type="submit">Unlock library</button>
       </form>
       <p id="unlock-status" class="status" role="status" aria-live="polite"></p>
@@ -29,7 +34,11 @@
       <header class="reader-header">
         <button id="menu-button" class="menu-button" type="button" aria-controls="sidebar" aria-expanded="false">Menu</button>
         <strong>Knowledge Library</strong>
-        <button id="lock-button" class="secondary" type="button">Lock</button>
+        <div class="reader-actions">
+          <span id="reader-status" class="reader-status" role="status" aria-live="polite"></span>
+          <button id="forget-button" class="secondary" type="button" aria-label="Forget saved unlock" hidden>Forget</button>
+          <button id="lock-button" class="secondary" type="button">Lock</button>
+        </div>
       </header>
       <div class="reader-grid">
         <aside id="sidebar" class="sidebar" aria-label="Library navigation">

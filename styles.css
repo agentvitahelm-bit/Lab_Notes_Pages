@@ -26,6 +26,9 @@ h1, h2, h3 { line-height: 1.2; }
 label { display: block; margin: 1rem 0 .35rem; font-weight: 700; }
 input { width: 100%; min-height: 2.75rem; padding: .65rem .75rem; border: 1px solid var(--border); border-radius: .4rem; background: var(--surface); color: var(--text); font: inherit; }
 input::placeholder { color: var(--muted); opacity: 1; }
+.checkbox-row { display: flex; align-items: flex-start; gap: .65rem; margin: 1rem 0 .25rem; font-weight: 700; cursor: pointer; }
+.checkbox-row input { flex: 0 0 auto; width: 1.25rem; min-height: 1.25rem; margin: .15rem 0 0; accent-color: var(--accent); }
+.help-text { display: block; color: var(--muted); }
 button { min-height: 2.75rem; margin-top: 1rem; padding: .65rem 1rem; border: 0; border-radius: .4rem; background: var(--accent); color: white; font: inherit; font-weight: 700; cursor: pointer; }
 button:hover { background: var(--accent-strong); }
 button:disabled { cursor: wait; opacity: .65; }
@@ -33,6 +36,8 @@ button.secondary { margin: 0; background: transparent; color: inherit; border: 1
 .status { min-height: 1.5em; color: var(--danger); }
 .reader { min-height: 100vh; background: var(--surface); }
 .reader-header { position: sticky; top: 0; z-index: 3; min-height: 4rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .65rem 1rem; color: white; background: var(--header); }
+.reader-actions { display: flex; align-items: center; justify-content: flex-end; gap: .6rem; min-width: 0; }
+.reader-status { max-width: 28rem; font-size: .8rem; line-height: 1.25; color: #f3f4f6; }
 .menu-button { display: none; margin: 0; border: 1px solid white; }
 .reader-grid { display: grid; grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr); min-height: calc(100vh - 4rem); }
 .sidebar { padding: 1rem; border-right: 1px solid var(--border); background: var(--surface-soft); overflow-y: auto; }
@@ -55,6 +60,8 @@ button.secondary { margin: 0; background: transparent; color: inherit; border: 1
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 @media (max-width: 46rem) {
   .menu-button { display: inline-block; }
+  .reader-header > strong { display: none; }
+  .reader-status { display: none; }
   .reader-grid { display: block; }
   .sidebar { position: fixed; inset: 4rem 0 0 0; z-index: 2; transform: translateX(-105%); transition: transform .2s ease; border-right: 0; }
   .sidebar.open { transform: translateX(0); }

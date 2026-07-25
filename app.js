@@ -8,6 +8,7 @@
   const MIN_ITERATIONS = 600000;
   const MAX_ITERATIONS = 2000000;
   const CONTENT_TYPE = "application/vnd.lab-notes.site+json";
+  const REMEMBERED_UNLOCK_KEY = "lab-notes-remembered-unlock-v1";
   const state = { files: null, routes: [], currentRoute: "", objectUrls: new Set() };
   const byId = (id) => document.getElementById(id);
   const unlockPanel = byId("unlock-panel");
@@ -15,6 +16,7 @@
   const passwordInput = byId("password");
   const unlockButton = byId("unlock-button");
   const unlockStatus = byId("unlock-status");
+  const rememberInput = byId("remember-unlock");
   const reader = byId("reader");
   const content = byId("content");
   const navigation = byId("navigation");
@@ -22,6 +24,8 @@
   const searchStatus = byId("search-status");
   const sidebar = byId("sidebar");
   const menuButton = byId("menu-button");
+  const forgetButton = byId("forget-button");
+  const readerStatus = byId("reader-status");
 
   function fromBase64(value) {
     if (typeof value !== "string") throw new Error("invalid release");
@@ -29,10 +33,21 @@
     return Uint8Array.from(binary, (character) => character.charCodeAt(0));
   }
 
+  function toBase64(value) {
+    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+    let binary = "";
+    bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+    return btoa(binary);
+  }
+
   function canonicalHeader(header) {
     const ordered = {};
     Object.keys(header).sort().forEach((key) => { ordered[key] = header[key]; });
     return new TextEncoder().encode(JSON.stringify(ordered));
+  }
+
+  async function envelopeFingerprint(envelope) {
+    return toBase64(new Uint8Array(await crypto.subtle.digest("SHA-256", canonicalHeader(envelope))));
   }
 
   function validateEnvelope(envelope) {
@@ -52,11 +67,67 @@
     return { salt, nonce };
   }
 
-  async function decryptRelease(password) {
+  async function fetchEnvelope() {
     const response = await fetch("payload.bin", { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
     if (!response.ok) throw new Error("release unavailable");
     const envelope = await response.json();
-    const { salt, nonce } = validateEnvelope(envelope);
+    validateEnvelope(envelope);
+    return envelope;
+  }
+
+  async function decryptWithKey(envelope, key) {
+    const { nonce } = validateEnvelope(envelope);
+    const header = { ...envelope };
+    delete header.ciphertext;
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: nonce, additionalData: canonicalHeader(header), tagLength: 128 },
+      key,
+      fromBase64(envelope.ciphertext)
+    );
+    const payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext));
+    if (!payload || payload.schema !== 1 || !payload.files || typeof payload.files !== "object") {
+      throw new Error("invalid release");
+    }
+    return payload;
+  }
+
+  function clearRememberedUnlock() {
+    try { localStorage.removeItem(REMEMBERED_UNLOCK_KEY); } catch (_) { /* Storage may be blocked. */ }
+    forgetButton.hidden = true;
+  }
+
+  function readRememberedUnlock() {
+    let raw;
+    try { raw = localStorage.getItem(REMEMBERED_UNLOCK_KEY); } catch (_) { return null; }
+    if (!raw) return null;
+    const record = JSON.parse(raw);
+    const fields = ["iterations", "key", "release", "salt", "version"];
+    if (!record || typeof record !== "object" || JSON.stringify(Object.keys(record).sort()) !== JSON.stringify(fields)) {
+      throw new Error("invalid saved unlock");
+    }
+    if (record.version !== 1 || !Number.isInteger(record.iterations) || record.iterations < MIN_ITERATIONS || record.iterations > MAX_ITERATIONS) {
+      throw new Error("invalid saved unlock");
+    }
+    if (fromBase64(record.salt).length !== 16 || fromBase64(record.key).length !== 32 || fromBase64(record.release).length !== 32) {
+      throw new Error("invalid saved unlock");
+    }
+    return record;
+  }
+
+  function saveRememberedUnlock(record) {
+    try {
+      localStorage.setItem(REMEMBERED_UNLOCK_KEY, JSON.stringify(record));
+      forgetButton.hidden = false;
+      return true;
+    } catch (_) {
+      clearRememberedUnlock();
+      return false;
+    }
+  }
+
+  async function decryptRelease(password, shouldRemember) {
+    const envelope = await fetchEnvelope();
+    const { salt } = validateEnvelope(envelope);
     const passwordBytes = new TextEncoder().encode(password);
     let material;
     try {
@@ -65,21 +136,49 @@
         { name: "PBKDF2", salt, iterations: envelope.iterations, hash: "SHA-256" },
         material,
         { name: "AES-GCM", length: 256 },
-        false,
+        shouldRemember,
         ["decrypt"]
       );
-      const header = { ...envelope };
-      delete header.ciphertext;
-      const plaintext = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: nonce, additionalData: canonicalHeader(header), tagLength: 128 },
-        key,
-        fromBase64(envelope.ciphertext)
-      );
-      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext));
+      const payload = await decryptWithKey(envelope, key);
+      let remembered = null;
+      if (shouldRemember) {
+        const rawKey = new Uint8Array(await crypto.subtle.exportKey("raw", key));
+        try {
+          remembered = {
+            version: 1,
+            salt: envelope.salt,
+            iterations: envelope.iterations,
+            release: await envelopeFingerprint(envelope),
+            key: toBase64(rawKey)
+          };
+        } finally {
+          rawKey.fill(0);
+        }
+      }
+      return { payload, remembered };
     } finally {
       passwordBytes.fill(0);
       material = null;
     }
+  }
+
+  async function decryptRememberedRelease(record) {
+    const envelope = await fetchEnvelope();
+    if (
+      record.salt !== envelope.salt ||
+      record.iterations !== envelope.iterations ||
+      record.release !== await envelopeFingerprint(envelope)
+    ) {
+      throw new Error("saved unlock is for another release");
+    }
+    const rawKey = fromBase64(record.key);
+    let key;
+    try {
+      key = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    } finally {
+      rawKey.fill(0);
+    }
+    return decryptWithKey(envelope, key);
   }
 
   function normalizeRoute(location) {
@@ -227,6 +326,16 @@
     state.objectUrls.clear();
   }
 
+  function showReader(payload) {
+    state.files = payload.files;
+    buildRoutes();
+    renderNavigation(state.routes);
+    passwordInput.value = "";
+    unlockPanel.hidden = true;
+    reader.hidden = false;
+    renderRoute("");
+  }
+
   function lock() {
     revokeObjects();
     state.files = null;
@@ -238,7 +347,9 @@
     reader.hidden = true;
     unlockPanel.hidden = false;
     unlockStatus.textContent = "";
+    readerStatus.textContent = "";
     passwordInput.value = "";
+    rememberInput.checked = !forgetButton.hidden;
     passwordInput.focus();
   }
 
@@ -247,16 +358,19 @@
     unlockStatus.textContent = "Unlocking…";
     unlockButton.disabled = true;
     const password = passwordInput.value;
+    const shouldRemember = rememberInput.checked;
     try {
-      const payload = await decryptRelease(password);
-      if (!payload || payload.schema !== 1 || !payload.files || typeof payload.files !== "object") throw new Error("invalid release");
-      state.files = payload.files;
-      buildRoutes();
-      renderNavigation(state.routes);
-      passwordInput.value = "";
-      unlockPanel.hidden = true;
-      reader.hidden = false;
-      renderRoute("");
+      const { payload, remembered } = await decryptRelease(password, shouldRemember);
+      if (remembered) {
+        const saved = saveRememberedUnlock(remembered);
+        readerStatus.textContent = saved
+          ? "Unlock remembered on this device until the encrypted site is updated."
+          : "Unlocked for this visit; browser storage was unavailable.";
+      } else {
+        clearRememberedUnlock();
+        readerStatus.textContent = "";
+      }
+      showReader(payload);
     } catch (_) {
       state.files = null;
       passwordInput.value = "";
@@ -266,6 +380,31 @@
       unlockButton.disabled = false;
     }
   });
+
+  async function attemptRememberedUnlock() {
+    let record;
+    try {
+      record = readRememberedUnlock();
+    } catch (_) {
+      clearRememberedUnlock();
+      unlockStatus.textContent = "Saved unlock was invalid and has been removed. Enter the password again.";
+      return;
+    }
+    if (!record) return;
+    unlockStatus.textContent = "Unlocking with the saved device key…";
+    unlockButton.disabled = true;
+    try {
+      const payload = await decryptRememberedRelease(record);
+      forgetButton.hidden = false;
+      readerStatus.textContent = "Unlocked with the saved device key. Use Forget saved unlock to remove it.";
+      showReader(payload);
+    } catch (error) {
+      if (error?.message !== "release unavailable") clearRememberedUnlock();
+      unlockStatus.textContent = "Saved unlock could not open this release. Enter the password again.";
+    } finally {
+      unlockButton.disabled = false;
+    }
+  }
 
   content.addEventListener("click", (event) => {
     const link = event.target.closest("a[data-reader-href]");
@@ -289,6 +428,12 @@
   });
   search.addEventListener("input", applySearch);
   byId("lock-button").addEventListener("click", lock);
+  forgetButton.addEventListener("click", () => {
+    clearRememberedUnlock();
+    lock();
+    rememberInput.checked = false;
+    unlockStatus.textContent = "Saved unlock removed from this browser.";
+  });
   menuButton.addEventListener("click", () => {
     const open = !sidebar.classList.contains("open");
     sidebar.classList.toggle("open", open);
@@ -296,4 +441,5 @@
   });
   addEventListener("pagehide", revokeObjects);
   addEventListener("beforeunload", revokeObjects);
+  attemptRememberedUnlock();
 })();
