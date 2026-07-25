@@ -9,7 +9,7 @@
   const MAX_ITERATIONS = 2000000;
   const CONTENT_TYPE = "application/vnd.lab-notes.site+json";
   const REMEMBERED_UNLOCK_KEY = "lab-notes-remembered-unlock-v1";
-  const state = { files: null, routes: [], currentRoute: "", objectUrls: new Set() };
+  const state = { files: null, routes: [], navigation: null, currentRoute: "", objectUrls: new Set() };
   const byId = (id) => document.getElementById(id);
   const unlockPanel = byId("unlock-panel");
   const unlockForm = byId("unlock-form");
@@ -26,6 +26,21 @@
   const menuButton = byId("menu-button");
   const forgetButton = byId("forget-button");
   const readerStatus = byId("reader-status");
+  const mobileNavigation = matchMedia("(max-width: 46rem)");
+
+  function setMenuOpen(open, returnFocus = false) {
+    const mobileOpen = mobileNavigation.matches && open;
+    sidebar.classList.toggle("open", mobileOpen);
+    menuButton.setAttribute("aria-expanded", String(mobileOpen));
+    sidebar.inert = mobileNavigation.matches && !mobileOpen;
+    sidebar.setAttribute("aria-hidden", String(mobileNavigation.matches && !mobileOpen));
+    if (mobileOpen) search.focus();
+    else if (returnFocus) menuButton.focus();
+  }
+
+  function syncMenuForViewport() {
+    setMenuOpen(!mobileNavigation.matches);
+  }
 
   function fromBase64(value) {
     if (typeof value !== "string") throw new Error("invalid release");
@@ -275,10 +290,23 @@
       if (link.dataset.route === normalized) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
-    sidebar.classList.remove("open");
-    menuButton.setAttribute("aria-expanded", "false");
+    const currentNavigationLink = [...navigation.querySelectorAll("a")].find(
+      (link) => link.dataset.route === normalized
+    );
+    const currentGroup = currentNavigationLink && currentNavigationLink.closest("details.navigation-section");
+    if (currentGroup) {
+      navigation.querySelectorAll("details.navigation-section").forEach((section) => {
+        section.open = section === currentGroup;
+      });
+    }
+    setMenuOpen(false);
     content.focus({ preventScroll: true });
-    if (anchor) document.getElementById(anchor)?.scrollIntoView(); else window.scrollTo(0, 0);
+    if (anchor) {
+      const target = document.getElementById(anchor);
+      const disclosure = target && target.closest("details");
+      if (disclosure) disclosure.open = true;
+      target?.scrollIntoView();
+    } else window.scrollTo(0, 0);
   }
 
   function buildRoutes() {
@@ -296,29 +324,135 @@
     if (!state.routes.some((entry) => entry.route === "")) throw new Error("release has no start page");
   }
 
-  function renderNavigation(routes) {
-    const list = document.createElement("ul");
-    routes.forEach((entry) => {
-      const item = document.createElement("li");
-      const link = document.createElement("a");
-      link.href = "#";
-      link.dataset.route = entry.route;
-      link.textContent = entry.title;
-      link.addEventListener("click", (event) => { event.preventDefault(); renderRoute(entry.route); });
-      item.append(link);
-      list.append(item);
+  function loadNavigation() {
+    const raw = JSON.parse(decodeText("reader-navigation.json"));
+    if (!raw || raw.schema !== 2 || !Array.isArray(raw.utilities) || !Array.isArray(raw.sections) || !Array.isArray(raw.search_records) || raw.sections.length < 5 || raw.sections.length > 7) {
+      throw new Error("release has invalid navigation");
+    }
+    const knownRoutes = new Set(state.routes.map((entry) => entry.route));
+    const seen = new Set();
+    const entries = [...raw.utilities, ...raw.sections.flatMap((section) => {
+      if (!section || typeof section.title !== "string" || !Array.isArray(section.items)) throw new Error("release has invalid navigation");
+      return section.items;
+    })];
+    entries.forEach((entry) => {
+      if (!entry || typeof entry.title !== "string" || !entry.title.trim() || typeof entry.route !== "string") throw new Error("release has invalid navigation");
+      const route = normalizeRoute(entry.route);
+      if (!knownRoutes.has(route) || seen.has(route)) throw new Error("release has invalid navigation");
+      entry.route = route;
+      seen.add(route);
     });
-    navigation.replaceChildren(list);
+    const searchSeen = new Set();
+    raw.search_records.forEach((entry) => {
+      if (!entry || typeof entry.title !== "string" || typeof entry.text !== "string" || typeof entry.route !== "string" || !["reviewed-guidance", "historical-source"].includes(entry.status)) {
+        throw new Error("release has invalid search metadata");
+      }
+      entry.route = normalizeRoute(entry.route);
+      entry.anchor = String(entry.anchor || "");
+      const identity = `${entry.status}\u0000${entry.route}\u0000${entry.anchor}`;
+      if (!knownRoutes.has(entry.route) || searchSeen.has(identity)) throw new Error("release has invalid search metadata");
+      searchSeen.add(identity);
+    });
+    state.navigation = raw;
+  }
+
+  function navigationLink(entry, searchResult = false) {
+    const link = document.createElement("a");
+    link.href = "#";
+    link.dataset.route = entry.route;
+    if (entry.anchor) link.dataset.anchor = entry.anchor;
+    if (searchResult) {
+      const title = document.createElement("span");
+      title.className = "search-result-title";
+      title.textContent = entry.title;
+      const badge = document.createElement("span");
+      badge.className = `status-badge ${entry.status}`;
+      badge.textContent = entry.status === "reviewed-guidance" ? "Reviewed guidance" : "Historical source";
+      const context = document.createElement("small");
+      context.textContent = entry.context || "";
+      link.append(title, badge, context);
+    } else {
+      link.textContent = entry.title;
+    }
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (searchResult) {
+        search.value = "";
+        renderNavigation();
+        searchStatus.textContent = `${state.navigation.sections.length} main sections`;
+      }
+      renderRoute(entry.route, entry.anchor || "");
+    });
+    return link;
+  }
+
+  function renderNavigation(routes = null) {
+    if (routes) {
+      const list = document.createElement("ul");
+      list.className = "search-results";
+      routes.forEach((entry) => {
+        const item = document.createElement("li");
+        item.append(navigationLink(entry, true));
+        list.append(item);
+      });
+      navigation.replaceChildren(list);
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    const utilityList = document.createElement("ul");
+    utilityList.className = "navigation-utilities";
+    state.navigation.utilities.forEach((entry) => {
+      const item = document.createElement("li");
+      item.append(navigationLink(entry));
+      utilityList.append(item);
+    });
+    fragment.append(utilityList);
+
+    state.navigation.sections.forEach((section, index) => {
+      const group = document.createElement("details");
+      group.className = "navigation-section";
+      group.dataset.section = section.slug;
+      group.open = index === 0;
+      const summary = document.createElement("summary");
+      summary.textContent = section.title;
+      group.append(summary);
+      const list = document.createElement("ul");
+      section.items.forEach((entry) => {
+        const item = document.createElement("li");
+        item.append(navigationLink(entry));
+        list.append(item);
+      });
+      group.append(list);
+      fragment.append(group);
+    });
+    navigation.replaceChildren(fragment);
+    if (state.currentRoute) {
+      const currentLink = [...navigation.querySelectorAll("a")].find(
+        (link) => link.dataset.route === state.currentRoute
+      );
+      if (currentLink) {
+        currentLink.setAttribute("aria-current", "page");
+        const currentSection = currentLink.closest("details.navigation-section");
+        if (currentSection) {
+          navigation.querySelectorAll("details.navigation-section").forEach((section) => {
+            section.open = section === currentSection;
+          });
+        }
+      }
+    }
   }
 
   function applySearch() {
     const terms = search.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    const matches = terms.length ? state.routes.filter((entry) => {
-      const haystack = `${entry.title} ${entry.text}`.toLocaleLowerCase();
+    const matches = terms.length ? state.navigation.search_records.filter((entry) => {
+      const haystack = `${entry.title} ${entry.context || ""} ${entry.text}`.toLocaleLowerCase();
       return terms.every((term) => haystack.includes(term));
-    }) : state.routes;
-    renderNavigation(matches);
-    searchStatus.textContent = `${matches.length} page${matches.length === 1 ? "" : "s"} found`;
+    }) : [];
+    renderNavigation(terms.length ? matches : null);
+    searchStatus.textContent = terms.length
+      ? `${matches.length} result${matches.length === 1 ? "" : "s"} found`
+      : `${state.navigation.sections.length} main sections`;
   }
 
   function revokeObjects() {
@@ -329,7 +463,9 @@
   function showReader(payload) {
     state.files = payload.files;
     buildRoutes();
-    renderNavigation(state.routes);
+    loadNavigation();
+    renderNavigation();
+    searchStatus.textContent = `${state.navigation.sections.length} main sections`;
     passwordInput.value = "";
     unlockPanel.hidden = true;
     reader.hidden = false;
@@ -340,6 +476,7 @@
     revokeObjects();
     state.files = null;
     state.routes = [];
+    state.navigation = null;
     state.currentRoute = "";
     content.replaceChildren();
     navigation.replaceChildren();
@@ -435,10 +572,16 @@
     unlockStatus.textContent = "Saved unlock removed from this browser.";
   });
   menuButton.addEventListener("click", () => {
-    const open = !sidebar.classList.contains("open");
-    sidebar.classList.toggle("open", open);
-    menuButton.setAttribute("aria-expanded", String(open));
+    const open = menuButton.getAttribute("aria-expanded") !== "true";
+    setMenuOpen(open, !open);
   });
+  addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && menuButton.getAttribute("aria-expanded") === "true") {
+      setMenuOpen(false, true);
+    }
+  });
+  mobileNavigation.addEventListener("change", syncMenuForViewport);
+  syncMenuForViewport();
   addEventListener("pagehide", revokeObjects);
   addEventListener("beforeunload", revokeObjects);
   attemptRememberedUnlock();
