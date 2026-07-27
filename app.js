@@ -284,11 +284,9 @@
   }
 
   function resolvePath(reference, route) {
-    // MkDocs preserves links relative to the source Markdown file, while reader
-    // routes use directory-style URLs. Resolve against a synthetic file path so
-    // ../../source-assets and sibling assets keep their authored depth.
-    const routeFile = route ? `${route.replace(/\/$/, "")}.html` : "index.html";
-    const base = `https://reader.invalid/${routeFile}`;
+    // Resolve the relative URL emitted in MkDocs' generated directory-style HTML
+    // against that page's actual packaged index.html path.
+    const base = `https://reader.invalid/${pagePath(route)}`;
     const url = new URL(reference, base);
     return decodeURIComponent(url.pathname.replace(/^\//, ""));
   }
