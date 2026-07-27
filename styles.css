@@ -53,6 +53,11 @@ button.secondary { margin: 0; background: transparent; color: inherit; border: 1
 .navigation-section summary::marker { color: var(--accent); }
 .navigation-section ul { padding: 0 0 .65rem .55rem; }
 .navigation-section a { padding: .42rem .5rem; font-size: .94rem; font-weight: 550; }
+.navigation-subsection { margin: .15rem 0; border-left: 2px solid var(--border); }
+.navigation-subsection > summary { padding: .48rem .5rem; font-size: .94rem; font-weight: 700; }
+.navigation-subsection > ul { padding: 0 0 .35rem .65rem; }
+.navigation-subsection .navigation-subsection { margin-left: .25rem; }
+.navigation-subsection a { font-size: .9rem; font-weight: 500; }
 .search-results { margin-top: .5rem !important; }
 .content { width: min(100%, 62rem); padding: clamp(1.2rem, 4vw, 3rem); overflow-wrap: anywhere; }
 .content.wide-table-page { width: 100%; max-width: none; padding-inline: clamp(1rem, 2vw, 1.5rem); }

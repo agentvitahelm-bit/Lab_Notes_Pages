@@ -134,27 +134,31 @@
   }
 
   function readNavigationState(sectionCount) {
+    const fallback = { open: new Set([0]), nested: new Set() };
     let raw;
-    try { raw = localStorage.getItem(NAVIGATION_STATE_KEY); } catch (_) { return new Set([0]); }
-    if (!raw) return new Set([0]);
+    try { raw = localStorage.getItem(NAVIGATION_STATE_KEY); } catch (_) { return fallback; }
+    if (!raw) return fallback;
     try {
       const record = JSON.parse(raw);
       if (
         !record ||
         typeof record !== "object" ||
-        JSON.stringify(Object.keys(record).sort()) !== JSON.stringify(["open", "release", "version"]) ||
-        record.version !== 1 ||
+        JSON.stringify(Object.keys(record).sort()) !== JSON.stringify(["nested", "open", "release", "version"]) ||
+        record.version !== 2 ||
         record.release !== state.navigationRelease ||
         !Array.isArray(record.open) ||
         record.open.some((index) => !Number.isInteger(index) || index < 0 || index >= sectionCount) ||
-        new Set(record.open).size !== record.open.length
+        new Set(record.open).size !== record.open.length ||
+        !Array.isArray(record.nested) ||
+        record.nested.some((route) => typeof route !== "string" || !state.routes.some((entry) => entry.route === route)) ||
+        new Set(record.nested).size !== record.nested.length
       ) {
         throw new Error("invalid navigation state");
       }
-      return new Set(record.open);
+      return { open: new Set(record.open), nested: new Set(record.nested) };
     } catch (_) {
       try { localStorage.removeItem(NAVIGATION_STATE_KEY); } catch (_) { /* Storage may be blocked. */ }
-      return new Set([0]);
+      return fallback;
     }
   }
 
@@ -162,11 +166,14 @@
     const groups = [...navigation.querySelectorAll("details.navigation-section")];
     if (!groups.length) return;
     const open = groups.flatMap((group, index) => group.open ? [index] : []);
+    const nested = [...navigation.querySelectorAll("details.navigation-subsection[open]")]
+      .map((group) => group.dataset.stateRoute)
+      .filter((route) => typeof route === "string" && state.routes.some((entry) => entry.route === route));
     if (!state.navigationRelease) return;
     try {
       localStorage.setItem(
         NAVIGATION_STATE_KEY,
-        JSON.stringify({ version: 1, release: state.navigationRelease, open })
+        JSON.stringify({ version: 2, release: state.navigationRelease, open, nested })
       );
     } catch (_) { /* Storage may be blocked. */ }
   }
@@ -398,9 +405,12 @@
     const currentNavigationLink = [...navigation.querySelectorAll("a")].find(
       (link) => link.dataset.route === normalized
     );
-    const currentGroup = currentNavigationLink && currentNavigationLink.closest("details.navigation-section");
-    if (currentGroup) {
-      currentGroup.open = true;
+    if (currentNavigationLink) {
+      let parent = currentNavigationLink.parentElement;
+      while (parent) {
+        if (parent.tagName === "DETAILS") parent.open = true;
+        parent = parent.parentElement;
+      }
       saveNavigationState();
     }
     setMenuOpen(false);
@@ -430,14 +440,21 @@
 
   function loadNavigation() {
     const raw = JSON.parse(decodeText("reader-navigation.json"));
-    if (!raw || raw.schema !== 2 || !Array.isArray(raw.utilities) || !Array.isArray(raw.sections) || !Array.isArray(raw.search_records) || raw.sections.length < 5 || raw.sections.length > 7) {
+    if (!raw || raw.schema !== 3 || !Array.isArray(raw.utilities) || !Array.isArray(raw.sections) || !Array.isArray(raw.search_records) || raw.sections.length < 5 || raw.sections.length > 7) {
       throw new Error("release has invalid navigation");
     }
     const knownRoutes = new Set(state.routes.map((entry) => entry.route));
     const seen = new Set();
+    const flattenItems = (items, depth = 0) => {
+      if (!Array.isArray(items) || depth > 3) throw new Error("release has invalid navigation");
+      return items.flatMap((entry) => {
+        if (!entry || (entry.children !== undefined && !Array.isArray(entry.children))) throw new Error("release has invalid navigation");
+        return [entry, ...flattenItems(entry.children || [], depth + 1)];
+      });
+    };
     const entries = [...raw.utilities, ...raw.sections.flatMap((section) => {
       if (!section || typeof section.title !== "string" || !Array.isArray(section.items)) throw new Error("release has invalid navigation");
-      return section.items;
+      return flattenItems(section.items);
     })];
     entries.forEach((entry) => {
       if (!entry || typeof entry.title !== "string" || !entry.title.trim() || typeof entry.route !== "string") throw new Error("release has invalid navigation");
@@ -480,6 +497,8 @@
     }
     link.addEventListener("click", (event) => {
       event.preventDefault();
+      // Capture open nested categories before route rendering rebuilds the navigation tree.
+      saveNavigationState();
       if (searchResult) {
         search.value = "";
         state.currentRoute = entry.route;
@@ -514,22 +533,46 @@
     });
     fragment.append(utilityList);
 
-    const openSections = readNavigationState(state.navigation.sections.length);
+    const navigationState = readNavigationState(state.navigation.sections.length);
+
+    const appendNavigationItems = (entries, list, depth = 0) => {
+      entries.forEach((entry) => {
+        const item = document.createElement("li");
+        if (Array.isArray(entry.children) && entry.children.length) {
+          const subgroup = document.createElement("details");
+          subgroup.className = "navigation-subsection";
+          subgroup.dataset.stateRoute = entry.route;
+          subgroup.open = navigationState.nested.has(entry.route);
+          subgroup.addEventListener("toggle", saveNavigationState);
+          subgroup.dataset.depth = String(depth + 1);
+          const subgroupSummary = document.createElement("summary");
+          subgroupSummary.textContent = entry.title;
+          subgroup.append(subgroupSummary);
+          const childList = document.createElement("ul");
+          const overviewItem = document.createElement("li");
+          overviewItem.append(navigationLink({ ...entry, title: "Overview" }));
+          childList.append(overviewItem);
+          appendNavigationItems(entry.children, childList, depth + 1);
+          subgroup.append(childList);
+          item.append(subgroup);
+        } else {
+          item.append(navigationLink(entry));
+        }
+        list.append(item);
+      });
+    };
+
     state.navigation.sections.forEach((section, index) => {
       const group = document.createElement("details");
       group.className = "navigation-section";
       group.dataset.section = section.slug;
-      group.open = openSections.has(index);
+      group.open = navigationState.open.has(index);
       group.addEventListener("toggle", saveNavigationState);
       const summary = document.createElement("summary");
       summary.textContent = section.title;
       group.append(summary);
       const list = document.createElement("ul");
-      section.items.forEach((entry) => {
-        const item = document.createElement("li");
-        item.append(navigationLink(entry));
-        list.append(item);
-      });
+      appendNavigationItems(section.items, list);
       group.append(list);
       fragment.append(group);
     });
@@ -540,11 +583,12 @@
       );
       if (currentLink) {
         currentLink.setAttribute("aria-current", "page");
-        const currentSection = currentLink.closest("details.navigation-section");
-        if (currentSection) {
-          currentSection.open = true;
-          saveNavigationState();
+        let parent = currentLink.parentElement;
+        while (parent) {
+          if (parent.tagName === "DETAILS") parent.open = true;
+          parent = parent.parentElement;
         }
+        saveNavigationState();
       }
     }
   }
