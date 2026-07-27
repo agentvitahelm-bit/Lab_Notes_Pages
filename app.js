@@ -343,6 +343,42 @@
     });
   }
 
+  function initializeInventoryTable() {
+    const table = content.querySelector("[data-inventory-table]");
+    const controls = content.querySelector("[data-inventory-controls]");
+    if (!table || !controls) return;
+    const rows = [...table.querySelectorAll("[data-inventory-row]")];
+    const textInput = controls.querySelector("[data-inventory-search]");
+    const category = controls.querySelector("[data-inventory-category]");
+    const holder = controls.querySelector("[data-inventory-holder]");
+    const availability = controls.querySelector("[data-inventory-availability]");
+    const completeness = controls.querySelector("[data-inventory-completeness]");
+    const status = controls.querySelector("[data-inventory-status]");
+    if (!textInput || !category || !holder || !availability || !completeness || !status) return;
+
+    const update = () => {
+      const terms = textInput.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+      let visible = 0;
+      rows.forEach((row) => {
+        const matchesText = terms.every((term) => (row.dataset.search || "").includes(term));
+        const matchesCategory = !category.value || row.dataset.category === category.value;
+        const matchesHolder = !holder.value || row.dataset.holder === holder.value;
+        const matchesAvailability = !availability.value || row.dataset.availability === availability.value;
+        const hasGaps = row.dataset.gaps === "true";
+        const matchesCompleteness = !completeness.value
+          || (completeness.value === "gaps" && hasGaps)
+          || (completeness.value === "complete" && !hasGaps);
+        const show = matchesText && matchesCategory && matchesHolder && matchesAvailability && matchesCompleteness;
+        row.hidden = !show;
+        if (show) visible += 1;
+      });
+      status.textContent = `Showing ${visible} of ${rows.length} rows`;
+    };
+    textInput.addEventListener("input", update);
+    [category, holder, availability, completeness].forEach((control) => control.addEventListener("change", update));
+    update();
+  }
+
   function renderRoute(route, anchor = "") {
     const normalized = normalizeRoute(route);
     const html = decodeText(pagePath(normalized));
@@ -351,6 +387,7 @@
     const article = source.cloneNode(true);
     sanitizeArticle(article, normalized);
     content.replaceChildren(...article.childNodes);
+    initializeInventoryTable();
     state.currentRoute = normalized;
     navigation.querySelectorAll("a").forEach((link) => {
       if (link.dataset.route === normalized) link.setAttribute("aria-current", "page");
@@ -409,7 +446,7 @@
     });
     const searchSeen = new Set();
     raw.search_records.forEach((entry) => {
-      if (!entry || typeof entry.title !== "string" || typeof entry.text !== "string" || typeof entry.route !== "string" || !["reviewed-guidance", "historical-source"].includes(entry.status)) {
+      if (!entry || typeof entry.title !== "string" || typeof entry.text !== "string" || typeof entry.route !== "string" || !["reviewed-guidance", "draft-guidance"].includes(entry.status)) {
         throw new Error("release has invalid search metadata");
       }
       entry.route = normalizeRoute(entry.route);
@@ -432,7 +469,7 @@
       title.textContent = entry.title;
       const badge = document.createElement("span");
       badge.className = `status-badge ${entry.status}`;
-      badge.textContent = entry.status === "reviewed-guidance" ? "Reviewed guidance" : "Historical source";
+      badge.textContent = entry.status === "reviewed-guidance" ? "Reviewed guidance" : "Controlled draft";
       const context = document.createElement("small");
       context.textContent = entry.context || "";
       link.append(title, badge, context);
