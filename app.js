@@ -387,6 +387,10 @@
     const article = source.cloneNode(true);
     sanitizeArticle(article, normalized);
     content.replaceChildren(...article.childNodes);
+    content.classList.toggle(
+      "wide-table-page",
+      Boolean(content.querySelector("table"))
+    );
     initializeInventoryTable();
     state.currentRoute = normalized;
     navigation.querySelectorAll("a").forEach((link) => {
